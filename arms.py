@@ -128,7 +128,7 @@ class LameArm(Arm):
         return 0
     def action(self,url,subject,log):
         '''Do add url with False-flag, to not visit again. TODO: reconsider this'''
-        log.add_url(url,False,arm = self.name)
+        log.add_url(url,False,estimate = 0,reward = 0,arm = self.name)
         return 0
     def reward(self,url,subject,content,**metric):
         return 0
@@ -183,7 +183,7 @@ class LinearArm(Classifier):
         self.classifier.train()
         prediction = self._evaluate(url,subject)
         optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr)
-        loss = self.loss(prediction[None],torch.Tensor([response]))
+        loss = self.loss(prediction[None],torch.Tensor([[response]]))
         self.classifier.zero_grad()
         loss.backward()
         optimizer.step()

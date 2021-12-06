@@ -63,7 +63,7 @@ class Lefty(Bandit):
         '''epsilon-greedy approach'''
         if np.random.rand() > self.epsilon:
             return 0 if self.arms[0].estimate(url,subject) > 0 else 1
-        return np.random.randint(0,1)
+        return np.random.randint(0,2)
     def action(self,url,subject,log):
         '''classifies the context-representation according the Evaluators current state'''
         self.current_arm = self.pick_arm(url,subject)
