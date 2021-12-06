@@ -79,7 +79,7 @@ class SubjectLog:
     def __init__(self,subject):
         self.subject = subject
         self.edges =  pd.DataFrame(columns = ['source','target'])
-        self.nodes = pd.DataFrame(columns = ['url','size','linkage','estimate','reward'])
+        self.nodes = pd.DataFrame(columns = ['url','size','linkage','estimate','reward','arm'])
         self.unexplored = []
     def download(self,url,**url_props):
         '''
@@ -89,6 +89,7 @@ class SubjectLog:
         try:
             with download(url,self.subject) as (page,path):
                 soup = BeautifulSoup(page.text,features='html.parser')
+                key = urlkey(url)
                 links = [{  'source':url,
                             'target': href}
                             for link in soup.find_all('a')
@@ -98,7 +99,7 @@ class SubjectLog:
                                         'size':int(page.headers['content-length']),
                                         'linkage' : len(links)},
                                     **url_props},
-                                    name = urlkey(url))
+                                    name = key)
                 return node,links
         except:
             # a faulty link gets added as empty row
@@ -142,9 +143,12 @@ class SubjectLog:
         Plots metrics of the bandit-actions.
         TODO: add chosen arm (!), plot cumulative to show total regret
         '''
-        self.nodes[['estimate','reward','size']]\
-            .assign(size = lambda df: df['size']/max_size)\
-            .plot()
+        self.nodes.reset_index()\
+            .assign(regret = lambda df: df.estimate-df.reward,
+                    key = lambda df:df.index)[['key','regret','arm']]\
+            .dropna(axis=0)\
+            .set_index(['key','arm']).unstack('arm')\
+            .fillna(0).cumsum().plot()
     def linkage(self,url):
         '''returns nr of logged incoming links'''
         return len(self.edges[self.edges.target.apply(urlkey) == urlkey(url)])
@@ -234,5 +238,6 @@ class Crawler:
         return self
     def done(self,max_pages,max_size):
         '''Signal ending criterium'''
-        print('downloaded ',self.log.size(),' of ',max_size)
+        # progress = round(20 * self.log.size() / max_size)
+        # print(''.join(['0']*progress + ['.']*(20-progress)))
         return self.log.length() >= max_pages or self.log.size() >= max_size

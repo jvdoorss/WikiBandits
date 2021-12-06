@@ -12,6 +12,8 @@ import numpy as np
 
 import arms
 
+MAX_PAGES = 100
+
 class Bandit:
     '''
     Abstract template for a multi-arm-evaluator
@@ -99,3 +101,32 @@ class Genealogist(Bandit):
         url1 = log.pick_child(current_url)
         self.current_arm = self.pick_arm(url0,url1)
         return url1 if self.current_arm else url0
+
+
+class Crampy(Bandit):
+    '''
+    Bandit with one linear arm and one discrete arm.
+
+    It explores until one outperforms the other in the UCB way.
+    '''
+    def __init__(self,**kwargs):
+        super().__init__(arms.Classifier(**kwargs),arms.LinearArm(**kwargs))
+        self.winner = None
+        self.current_arm = None
+    def reward(self,url,subject,content,**metric):
+        return self.arms[self.current_arm].reward(url,subject,content,**metric)
+    def pick_arm(self,url,subject):
+        '''explore first approach'''
+        hoeffding = np.sqrt(2* MAX_PAGES / (sum(a.runs for a in self.arms)+1))
+        if self.winner is None:
+            if self.arms[0].mean - self.arms[1].mean > 4 * hoeffding:
+                self.winner = 0
+            elif self.arms[1].mean - self.arms[0].mean > 4 * hoeffding:
+                self.winner = 1
+        return np.random.randint(0,2) if self.winner is None else self.winner
+    def action(self,url,subject,log):
+        '''classifies the context-representation according the Evaluators current state'''
+        self.current_arm = self.pick_arm(url,subject)
+        arm = self.arms[self.current_arm]
+        return arm.action(url,subject,log)
+

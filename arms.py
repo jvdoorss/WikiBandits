@@ -15,10 +15,24 @@ The arms can be fed to Bandits in the bandits module.
 from enum import Enum
 
 import torch
-from torch.nn import Sequential, Linear, CrossEntropyLoss, Softmax
+from torch.nn import Sequential, Linear, CrossEntropyLoss, Softmax, MSELoss
 from scipy.special import ndtr
 
 from crawler import PropsFetchError, wiki_relevance, wiki_size, MAX_SIZE
+
+
+def response(subject, content, relative_size, log = None):
+    ''' 
+    custom reward for webpages, with or without log
+    
+    A more accurate implementaion could involve:
+    - hyper-linkedness to other downloaded pages
+    - time a user spends on the page
+    - general click-count for the page (if this is public info)
+    - stats like nr.of contributors, last update, references,...
+    - separate size-weight for text and images
+    '''
+    return content.count(subject) / 100 - relative_size
 
 class Arm:
     '''
@@ -26,8 +40,11 @@ class Arm:
 
     Serves mainly as a placeholder for now.
     '''
+    counter = 0
     def __init__(self,**parameters):
         self._parameters = parameters
+        self.name = 'Arm'+str(Arm.counter)
+        Arm.counter += 1
     def estimate(self,url,subject):
         '''
         Predictor to map the state of the Arm and the context-variables
@@ -58,6 +75,9 @@ class Classifier(Arm):
         super().__init__(**parameters)
         self.classifier = Sequential(Linear(2,2),Softmax(dim=-1))
         self.loss = CrossEntropyLoss()
+        self.mean = 0
+        self.var = 0
+        self.runs = 0
     def _evaluate(self,url,subject):
         '''
         Helper function to create an intermediate representation
@@ -66,26 +86,24 @@ class Classifier(Arm):
         context_representation = torch.Tensor([ wiki_relevance(url,subject),
                                     wiki_size(url,self._parameters.get('max_size',MAX_SIZE))])
         return self.classifier(context_representation)
-    def estimate(self,url,subject):
+    def estimate(self,url,subject,new_case = True):
         '''estimate of the reward based on the internal state'''
         res = self._evaluate(url,subject)
-        return (res[1] - res[0]).item()
+        est = (res[1] - res[0]).item()
+        if new_case:
+            self.runs +=1
+            self.var += ((est - self.mean) ** 2 - self.var)/self.runs
+            self.mean += (est - self.mean) / self.runs 
+        return est
     def action(self,url,subject,log):
         estimate =  self.estimate(url,subject)
-        log.add_url(url,True,estimate = estimate)
+        log.add_url(url,True,estimate = estimate,arm = self.name)
         return estimate
     def _response(self,subject,content,size):
         '''
         Custom translation of the resulting content to a reward.
-
-        A more accurate implementaion could involve:
-        - hyper-linkedness to other downloaded pages
-        - time a user spends on the page
-        - general click-count for the page (if this is public info)
-        - stats like nr.of contributors, last update, references,...
-        - separate size-weight for text and images
         '''
-        return content.count(subject) / 100 - size / self._parameters.get('max_size',MAX_SIZE)
+        return response(subject,content,size/ self._parameters.get('max_size',MAX_SIZE))
     def reward(self,url,subject,content,**metric):
         # get the response and adjest the learning rate accordingly,
         # this way the binary classifier takes the size into account
@@ -110,7 +128,7 @@ class LameArm(Arm):
         return 0
     def action(self,url,subject,log):
         '''Do add url with False-flag, to not visit again. TODO: reconsider this'''
-        log.add_url(url,False)
+        log.add_url(url,False,arm = self.name)
         return 0
     def reward(self,url,subject,content,**metric):
         return 0
@@ -139,3 +157,36 @@ class Connector(Classifier):
             pass
         context_representation = torch.Tensor([ linkage_score, size_score])
         return self.classifier(context_representation)
+
+class LinearArm(Classifier):
+    '''
+    Class to evaluate relevance of a <url,subject,size> context using linear regression.
+
+    For convenience we derive from Classifier here, since there's little difference
+    '''
+    def __init__(self,**parameters):
+        '''
+        overwriting Classifier mostly
+        '''
+        super().__init__(**parameters)
+        self.classifier = Sequential(Linear(2,1))
+        self.loss = MSELoss()
+    def estimate(self,url,subject):
+        '''estimate of the reward based on the internal state'''
+        res = self._evaluate(url,subject)
+        return res.item()
+    def reward(self,url,subject,content,**metric):
+        response = self._response(subject,content,metric.get('size',0))
+        lr = self._parameters.get('lr',0.1)
+
+        # train logistic regressor as usual
+        self.classifier.train()
+        prediction = self._evaluate(url,subject)
+        optimizer = torch.optim.SGD(self.classifier.parameters(), lr=lr)
+        loss = self.loss(prediction[None],torch.Tensor([response]))
+        self.classifier.zero_grad()
+        loss.backward()
+        optimizer.step()
+        self.classifier.eval()
+
+        return response
