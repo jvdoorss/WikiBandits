@@ -8,8 +8,5 @@ An arm-action results in a download which reveals the cost/reward after the fact
 
 Modules: numpy, scypi, torch, pandas, requests, bs4 (beautifulsoup) and wikipedia2vec. Using a pretrained version of the latter, to be [downloaded](http://wikipedia2vec.s3.amazonaws.com/models/en/2018-04-20/enwiki_20180420_100d.pkl.bz2) separately.
 
-## TODO:
+The current code allows to illustrate some bandit-techniques, but requires some more work to become a quantitatively useful prototype.
 
-- update/add reward function
-- test convergence in a long run
-- test other exploration methods 
