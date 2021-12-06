@@ -12,7 +12,7 @@ import numpy as np
 
 import arms
 
-MAX_PAGES = 100
+MAX_PAGES = 500
 
 class Bandit:
     '''

@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 from bs4 import BeautifulSoup
 
-MAX_SIZE = 1000000
+MAX_SIZE = 5000000
 
 #######################################################################################
 #
@@ -141,10 +141,9 @@ class SubjectLog:
     def plot(self,max_size = MAX_SIZE):
         '''
         Plots metrics of the bandit-actions.
-        TODO: add chosen arm (!), plot cumulative to show total regret
         '''
         self.nodes.reset_index()\
-            .assign(regret = lambda df: df.estimate-df.reward,
+            .assign(regret = lambda df: -df.reward.clip(None,0),
                     key = lambda df:df.index)[['key','regret','arm']]\
             .dropna(axis=0)\
             .set_index(['key','arm']).unstack('arm')\
