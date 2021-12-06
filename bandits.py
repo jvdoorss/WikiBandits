@@ -1,4 +1,12 @@
-from enum import Enum
+'''
+Module defining Bandits: objects that are passed to Crawler and can:
+        - pick an arm form the arms module
+        - perform the arms action
+        - reward the arm
+
+The set of specialisations of the abstract Bandit is intended to contain a number of (2) arm
+combiniations as well as a set of exploration methods to compare results and build intuition.
+'''
 
 import numpy as np
 
@@ -8,15 +16,18 @@ class Bandit:
     '''
     Abstract template for a multi-arm-evaluator
 
-    For now serving as an explainatory placeholder, but would hold common features if
-    the nr. of Bandits were to increase.
+    For now serving as an explainatory placeholder, but would hold common
+    features if the nr. of Bandits were to increase.
     '''
-    def __init__(self,*arms,**kwargs):
-        self.arms = arms
+    def __init__(self,*bandit_arms,**kwargs):
+        self.arms = bandit_arms
         self.current_arm = None
-    def reward(self,url,subject,content,**metric): pass
-    def pick_arm(self,url,subject):pass
-    def action(self,url,subject,log): pass
+    def reward(self,url,subject,content,**metric):
+        '''score result of the bandits action'''
+    def pick_arm(self,url,subject):
+        '''choose arm by some heuristic: e-greedy, ucb1,...'''
+    def action(self,url,subject,log):
+        '''perform the picked arms action'''
     def pop(self,log):
         '''redefining pop to enable the bandit to overwrite it'''
         return log.pop()
@@ -35,8 +46,13 @@ class ClassyBandit(Bandit):
         return self.arms[0].reward(url,subject,content,size = size)
 
 class Lefty(Bandit):
+    '''
+    Bandit with only one relevant arm, scoring positive or negative,
+    pitched against the nothing option.
+    Exploring the right arm is in fact useless here.
+    '''
     def __init__(self,**kwargs):
-        self.arms = [arms.Classifier(**kwargs),arms.LameArm()]
+        super().__init__(arms.Classifier(**kwargs),arms.LameArm())
         self.epsilon = kwargs.get('epsilon',0.1)
         self.current_arm = None
     def reward(self,url,subject,content,**metric):
@@ -54,14 +70,13 @@ class Lefty(Bandit):
 
 class Genealogist(Bandit):
     '''
-    Bandit that picks new urls based on either a breadth-first (siblings) of depth-first (children)
-    strategy depending on the existing linkage-properties of the respective pages and receives reward accordingly.
-
-
+    Bandit that picks new urls based on either a breadth-first (siblings)
+    or depth-first (children) strategy depending on the existing linkage-properties
+    of the respective pages and receives reward accordingly.
     '''
     def __init__(self,log,**kwargs):
-        self.arms = [   arms.Connector(log,arms.Pop.Sibling,**kwargs),
-                        arms.Connector(log,arms.Pop.Child,**kwargs)]
+        super().__init__(arms.Connector(log,arms.Pop.SIBLING,**kwargs),
+                        arms.Connector(log,arms.Pop.CHILD,**kwargs))
         self.epsilon = kwargs.get('epsilon',0.1)
         self.current_arm = None
         self.log = log
@@ -70,7 +85,9 @@ class Genealogist(Bandit):
     def pick_arm(self,url0,url1):
         '''epsilon-greedy approach'''
         if np.random.rand() > self.epsilon:
-            return 0 if self.arms[0].estimate(url0,self.log.subject) > self.arms[1].estimate(url1,self.log.subject) else 1
+            return (0 if self.arms[0].estimate(url0,self.log.subject)
+                            > self.arms[1].estimate(url1,self.log.subject)
+                      else 1)
         return np.random.randint(0,1)
     def action(self,url,subject,log):
         '''classifies the context-representation according the Evaluators current state'''

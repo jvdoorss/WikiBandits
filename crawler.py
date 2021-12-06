@@ -1,4 +1,15 @@
-# This module provides tools to gather content surrounding a single subject on wikipedia efficiently
+'''
+This module provides tools to gather content surrounding a single subject on wikipedia efficiently.
+
+Essential classes are:
+    - the SubjectLog, that keeps a structured history of aquired knowledge, adding
+      to the context for the Arms and Bandits in the respective modules.
+    - the Crawler, random walking trough links in the (increasing) SubjectLog based
+      on a given Bandit's decisions.
+
+To use the Wikipedia2Vec functionality, enwiki_20180420_100d.pkl is needed:
+http://wikipedia2vec.s3.amazonaws.com/models/en/2018-04-20/enwiki_20180420_100d.pkl.bz2
+'''
 
 import os
 from contextlib import contextmanager
@@ -17,9 +28,11 @@ MAX_SIZE = 1000000
 #
 
 def urlkey(url):
+    '''converts url to a unique, shorter identifier'''
     return url.split('/')[-1].replace('_',' ')
 
 def complete_url(url):
+    '''extends the short urls'''
     prefix = 'https://en.wikipedia.org'
     sections = url.strip('/').split('/')
     if sections[0] == 'wiki':
@@ -37,13 +50,13 @@ def download(url,subject):
     folder = 'repos/'+subject+'/'
     name = url.split('/')[-1]+'.html'
     path = folder + name
-    page = requests.get(url)  
+    page = requests.get(url)
     try:
         os.makedirs(folder,exist_ok=True)
         yield page,path
-        with open(path, "x") as file:
+        with open(path, "x",encoding="utf8") as file:
             file.write(page.text)
-    except:
+    except FileExistsError:
         pass
 
 class SubjectLog:
@@ -56,7 +69,8 @@ class SubjectLog:
     @attrib subject: the subject at hand
     @attrib nodes: the pages that were considered an possibly downloaded
     @attrib edges: outging hyperlinks from all downloaded pages
-        TODO:   This could be used to set up a measure for subsequent url's, and perhaps replace wikipedia2vec
+        TODO:   This could be used to set up a measure for subsequent url's,
+                and perhaps replace wikipedia2vec
                 unused for now
     @attrib unexplored: queue of all outgoing links that were encountered, possibly many duplicates,
                         which are skipped when iterating with 'pop()'
@@ -69,14 +83,15 @@ class SubjectLog:
         self.unexplored = []
     def download(self,url,**url_props):
         '''
-        Performs the download. The download context will add the page to the repo afterwards, if no exceptions are raised.
+        Performs the download. The download context will add the page to the repo afterwards,
+        if no exceptions are raised.
         '''
         try:
-            with download(url,self.subject) as (page,path):  
+            with download(url,self.subject) as (page,path):
                 soup = BeautifulSoup(page.text,features='html.parser')
-                links = [{  'source':url, 
-                            'target': href}  
-                            for link in soup.find_all('a') 
+                links = [{  'source':url,
+                            'target': href}
+                            for link in soup.find_all('a')
                             if isinstance(href := link.get('href'),str) and '/wiki/' in href]
                 node = pd.Series({**{   'path':path,
                                         'url':url,
@@ -91,15 +106,21 @@ class SubjectLog:
             links = []
             return node,links
     def pop(self):
-        '''pops urls from the front of the unexplored queue until a new one (not yet in nodes) is found'''
-        if not self.unexplored: raise EmptyQueue()
+        '''
+        Pops urls from the front of the unexplored queue until a new one
+        (not yet in nodes) is found
+        '''
+        if not self.unexplored:
+            raise EmptyQueue()
         current,*self.unexplored = self.unexplored
         while urlkey(current) in self.nodes.index:
-            if not self.unexplored: raise EmptyQueue()
+            if not self.unexplored:
+                raise EmptyQueue()
             current, *self.unexplored = self.unexplored
         return complete_url(current)
-    def add_url(self,url,download,**url_props):
-        if download:
+    def add_url(self,url,download_flag,**url_props):
+        '''Add url to log and download to repo ifneedsbe'''
+        if download_flag:
             node,links = self.download(url,**url_props)
             self.edges = self.edges.append(links,ignore_index=True)
             self.unexplored += [link['target'] for link in links]
@@ -108,25 +129,34 @@ class SubjectLog:
         self.nodes = self.nodes.append(node)
         return self
     def length(self):
+        '''total nr of urls explored: downloaded or not'''
         return len(self.nodes)
     def size(self):
+        '''total downloaded size'''
         return self.nodes['size'].sum()
     def downloads(self):
+        '''total nr of downloaded urls'''
         return len(self.nodes.path.dropna())
     def plot(self,max_size = MAX_SIZE):
+        '''
+        Plots metrics of the bandit-actions.
+        TODO: add chosen arm (!), plot cumulative to show total regret
+        '''
         self.nodes[['estimate','reward','size']]\
             .assign(size = lambda df: df['size']/max_size)\
             .plot()
     def linkage(self,url):
+        '''returns nr of logged incoming links'''
         return len(self.edges[self.edges.target.apply(urlkey) == urlkey(url)])
     def pick_sibling(self,url):
         '''
-        Returns most connected sibling of url in the already built-up graph 
-        
-        Note:   Initially this will return all wikipedia system pages, recording them as node and 
+        Returns most connected sibling of url in the already built-up graph
+
+        Note:   Initially this will return all wikipedia system pages, recording them as node and
                 ignoring them in the long run.
         '''
-        parents = self.edges[self.edges.target.apply(urlkey) == urlkey(url)][['source']].drop_duplicates()
+        parents = self.edges[self.edges.target.apply(urlkey) == urlkey(url)][['source']]\
+                        .drop_duplicates()
         siblings = self.edges.merge(parents,on = 'source',how='right')[['target']].drop_duplicates()
         incoming = self.edges.merge(siblings,on = 'target',how='inner')\
             .groupby('target')\
@@ -138,7 +168,8 @@ class SubjectLog:
         return incoming.url[0]
     def pick_child(self,url):
         '''returns most connected child of url according to current graph'''
-        children = self.edges[self.edges.source.apply(urlkey) == urlkey(url)][['target']].drop_duplicates()
+        children = self.edges[self.edges.source.apply(urlkey) == urlkey(url)][['target']]\
+                        .drop_duplicates()
         incoming = self.edges.merge(children,on = 'target',how='inner')\
             .groupby('target')\
             .count()\
@@ -148,7 +179,8 @@ class SubjectLog:
         incoming.drop(self.nodes.index.map(urlkey),errors='ignore',inplace=True)
         return incoming.url[0]
 
-class PropsFetchError(Exception): pass
+class PropsFetchError(Exception):
+    '''Blanket solution when fetching page data fails.'''
 
 def wiki_size(url,max_size):
     '''returns the relative size of the page from header info'''
@@ -172,7 +204,8 @@ wiki_relevance.embedding = Wikipedia2Vec.load('enwiki_20180420_100d.pkl')
 #
 # Tool for iterating pages
 
-class EmptyQueue(Exception): pass
+class EmptyQueue(Exception):
+    '''Signals no more unexplored url's (shouldn't happen)'''
 
 class Crawler:
     '''
@@ -188,16 +221,18 @@ class Crawler:
         self.current_url = self.bandit.pop(self.log)
         return self
     def process(self):
+        ''' Perform bandit action and rewarding'''
         self.bandit.action(self.current_url,self.subject,self.log)
 
         key = urlkey(self.current_url)
         if (path := self.log.nodes.at[key,'path']) and pd.notna(path):
-            with open(path,'r') as file:
+            with open(path,'r',encoding="utf8") as file:
                 content = file.readlines()
             size = self.log.nodes.at[key,'size']
             res = self.bandit.reward(self.current_url,self.subject,content,size = size)
             self.log.nodes.at[key,'reward'] = res
         return self
     def done(self,max_pages,max_size):
+        '''Signal ending criterium'''
         print('downloaded ',self.log.size(),' of ',max_size)
-        return self.log.length() >= max_pages or self.log.size() >= max_size 
+        return self.log.length() >= max_pages or self.log.size() >= max_size
